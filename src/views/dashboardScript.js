@@ -39,6 +39,53 @@ function formatCacheTime(cachedAt) {
   }
 }
 
+function formatMetricNumber(value) {
+  if (value >= 100) return value.toFixed(0);
+  if (value >= 10) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+function formatBandwidth(bandwidth) {
+  const value = Number(bandwidth?.value);
+  if (!Number.isFinite(value) || value < 0) return 'N/A';
+
+  const unit = String(bandwidth?.unit || 'GB').toUpperCase();
+  const gigabytes = unit === 'TB'
+    ? value * 1024
+    : unit === 'MB'
+      ? value / 1024
+      : unit === 'KB'
+        ? value / (1024 * 1024)
+        : unit === 'B'
+          ? value / (1024 * 1024 * 1024)
+          : value;
+
+  if (gigabytes >= 1) {
+    return formatMetricNumber(gigabytes) + ' GB';
+  }
+
+  return formatMetricNumber(gigabytes * 1024) + ' MB';
+}
+
+function formatCustomDomains(domains) {
+  if (!Array.isArray(domains) || domains.length === 0) return [];
+
+  return domains
+    .map(domain => {
+      const name = typeof domain === 'string' ? domain : domain?.name;
+      if (!name) return '';
+
+      const status = domain?.verificationStatus === 'verified'
+        ? '已验证'
+        : domain?.verificationStatus === 'unverified'
+          ? '未验证'
+          : '';
+
+      return status ? name + '（' + status + '）' : name;
+    })
+    .filter(Boolean);
+}
+
 // 更新缓存信息显示
 function updateCacheInfo(cachedAt) {
   lastCachedAt = cachedAt;
@@ -232,7 +279,22 @@ function createServiceCard(service) {
 
     const valueEl = document.createElement('span');
     valueEl.className = 'info-value';
-    valueEl.textContent = value;
+
+    if (Array.isArray(value)) {
+      valueEl.classList.add('info-value-list');
+      if (value.length === 0) {
+        valueEl.textContent = '暂无';
+      } else {
+        value.forEach(entry => {
+          const entryEl = document.createElement('span');
+          entryEl.className = 'info-value-entry';
+          entryEl.textContent = entry;
+          valueEl.appendChild(entryEl);
+        });
+      }
+    } else {
+      valueEl.textContent = value;
+    }
 
     item.appendChild(labelEl);
     item.appendChild(valueEl);
@@ -242,6 +304,8 @@ function createServiceCard(service) {
   appendInfo('套餐', service?.plan || 'N/A');
   appendInfo('环境', service?.env || 'N/A');
   appendInfo('自动部署', service?.autoDeploy === 'yes' ? '已启用' : '已禁用');
+  appendInfo('本月流量', formatBandwidth(service?.bandwidth));
+  appendInfo('绑定域名', formatCustomDomains(service?.customDomains));
 
   const idItem = document.createElement('div');
   idItem.className = 'info-item';

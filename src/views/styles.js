@@ -1268,6 +1268,19 @@ h1 {
   font-size: 13px;
   color: var(--text-primary);
   font-weight: 500;
+  min-width: 0;
+}
+
+.info-value-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-value-entry {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* 旧版样式兼容 */

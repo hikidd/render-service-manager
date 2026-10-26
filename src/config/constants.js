@@ -13,7 +13,7 @@ export const CACHE_CONFIG = {
   SOFT_TTL: 15 * 60 * 1000,       // 软 TTL: 15 分钟（fresh）
   HARD_TTL: 24 * 60 * 60 * 1000,  // 硬 TTL: 24 小时（stale -> expired）
   KV_TTL: 48 * 60 * 60,           // KV 存储 TTL: 48 小时（秒）
-  VERSION: 'v1',                   // 缓存版本（数据结构变更时递增）
+  VERSION: 'v2',                   // 缓存版本（数据结构变更时递增）
 };
 
 // API 请求配置

@@ -1,4 +1,9 @@
-import { getServicesForAccount, triggerDeployment } from '../services/renderApi.js';
+import {
+  getServicesForAccount,
+  getBandwidthForServices,
+  getCustomDomainsForService,
+  triggerDeployment
+} from '../services/renderApi.js';
 import { jsonResponse } from '../utils/response.js';
 import { getAccounts, withAccount, safeParseJson } from '../utils/helpers.js';
 import { HTTP_STATUS } from '../config/constants.js';
@@ -9,6 +14,51 @@ import {
 } from '../services/cache.js';
 
 /**
+ * 补充服务的带宽和自定义域名信息
+ * @param {Object} account - 账户信息
+ * @param {Array<Object>} services - 服务列表
+ * @returns {Promise<Array<Object>>}
+ */
+async function enrichServices(account, services) {
+  const serviceIds = services.map(service => service.id).filter(Boolean);
+  let bandwidthByService = new Map();
+
+  try {
+    bandwidthByService = await getBandwidthForServices(account, serviceIds);
+  } catch (error) {
+    console.error(`获取账户 ${account.name} 的带宽使用量失败:`, error);
+  }
+
+  const domainsByService = new Map();
+  const domainBatchSize = 5;
+
+  for (let index = 0; index < services.length; index += domainBatchSize) {
+    const batch = services.slice(index, index + domainBatchSize);
+    const results = await Promise.allSettled(
+      batch.map(async service => ({
+        serviceId: service.id,
+        domains: await getCustomDomainsForService(account, service.id),
+      }))
+    );
+
+    results.forEach((result, resultIndex) => {
+      const service = batch[resultIndex];
+      if (result.status === 'fulfilled') {
+        domainsByService.set(result.value.serviceId, result.value.domains);
+      } else {
+        console.error(`获取服务 ${service?.id || 'unknown'} 的自定义域名失败:`, result.reason);
+      }
+    });
+  }
+
+  return services.map(service => ({
+    ...service,
+    bandwidth: bandwidthByService.get(service.id) || null,
+    customDomains: domainsByService.get(service.id) || [],
+  }));
+}
+
+/**
  * 刷新单个账户的 Services 并更新缓存
  * @param {Object} env - 环境变量
  * @param {Object} account - 账户信息
@@ -16,7 +66,8 @@ import {
  */
 async function refreshAccountServices(env, account) {
   const services = await getServicesForAccount(account);
-  const servicesWithAccount = services.map(service => ({
+  const enrichedServices = await enrichServices(account, services);
+  const servicesWithAccount = enrichedServices.map(service => ({
     ...service,
     accountId: account.id,
     accountName: account.name,

@@ -95,6 +95,40 @@ async function fetchWithRetry(url, options, { timeoutMs = API_CONFIG.TIMEOUT_MS,
   throw new Error('请求失败: 超出重试次数');
 }
 
+function getCurrentMonthTimeRange(now = new Date()) {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  return {
+    startTime: start.toISOString(),
+    endTime: now.toISOString(),
+  };
+}
+
+function toGigabytes(value, unit = 'GB') {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 0;
+
+  switch (String(unit).toUpperCase()) {
+    case 'B':
+      return numericValue / (1024 ** 3);
+    case 'KB':
+      return numericValue / (1024 ** 2);
+    case 'MB':
+      return numericValue / 1024;
+    case 'TB':
+      return numericValue * 1024;
+    case 'GB':
+    default:
+      return numericValue;
+  }
+}
+
+function getSeriesResourceId(series, fallbackId = null) {
+  const resourceLabel = series?.labels?.find(label =>
+    label?.field === 'service' || label?.field === 'resource'
+  );
+  return resourceLabel?.value || fallbackId;
+}
+
 /**
  * 获取特定Render账户的服务
  * @param {Object} account - 账户配置
@@ -166,6 +200,111 @@ export async function getServicesForAccount(account) {
         ownerId: service.ownerId
       };
     });
+}
+
+/**
+ * 获取服务本月带宽使用量
+ * @param {Object} account - 账户配置
+ * @param {Array<string>} serviceIds - 服务 ID 列表
+ * @param {Object} timeRange - 时间范围
+ * @returns {Promise<Map<string, {value: number, unit: string}>>}
+ */
+export async function getBandwidthForServices(account, serviceIds, timeRange = getCurrentMonthTimeRange()) {
+  const uniqueServiceIds = [...new Set((serviceIds || []).filter(Boolean))];
+  const bandwidthByService = new Map(
+    uniqueServiceIds.map(serviceId => [serviceId, { value: 0, unit: 'GB' }])
+  );
+
+  if (uniqueServiceIds.length === 0) {
+    return bandwidthByService;
+  }
+
+  const params = new URLSearchParams();
+  uniqueServiceIds.forEach(serviceId => params.append('resource', serviceId));
+  params.set('startTime', timeRange.startTime);
+  params.set('endTime', timeRange.endTime);
+
+  const url = `${RENDER_API_BASE}/metrics/bandwidth?${params.toString()}`;
+  const seriesList = await fetchWithRetry(url, {
+    headers: createHeaders(account.apiKey)
+  });
+
+  if (!Array.isArray(seriesList)) {
+    throw new Error('API 返回带宽数据格式错误');
+  }
+
+  seriesList.forEach(series => {
+    const serviceId = getSeriesResourceId(
+      series,
+      uniqueServiceIds.length === 1 ? uniqueServiceIds[0] : null
+    );
+    if (!serviceId || !bandwidthByService.has(serviceId)) return;
+
+    const current = bandwidthByService.get(serviceId);
+    const values = Array.isArray(series?.values) ? series.values : [];
+    const addedGigabytes = values.reduce((total, point) => {
+      return total + toGigabytes(point?.value, point?.unit || series?.unit || 'GB');
+    }, 0);
+
+    current.value += addedGigabytes;
+  });
+
+  return bandwidthByService;
+}
+
+/**
+ * 获取服务的自定义域名
+ * @param {Object} account - 账户配置
+ * @param {string} serviceId - 服务ID
+ * @returns {Promise<Array<Object>>} - 自定义域名列表
+ */
+export async function getCustomDomainsForService(account, serviceId) {
+  const allDomains = [];
+  const seenCursors = new Set();
+  let cursor = null;
+
+  while (true) {
+    const params = new URLSearchParams();
+    params.set('limit', API_CONFIG.PAGE_LIMIT.toString());
+    if (cursor) {
+      params.set('cursor', cursor);
+    }
+
+    const url = `${RENDER_API_BASE}/services/${encodeURIComponent(serviceId)}/custom-domains?${params.toString()}`;
+    const page = await fetchWithRetry(url, {
+      headers: createHeaders(account.apiKey)
+    });
+
+    if (!Array.isArray(page)) {
+      throw new Error('API 返回自定义域名数据格式错误');
+    }
+
+    const domains = page
+      .map(item => item?.customDomain || item)
+      .filter(domain => domain && typeof domain === 'object');
+    allDomains.push(...domains);
+
+    const nextCursor = page[page.length - 1]?.cursor;
+    if (!nextCursor || typeof nextCursor !== 'string' || seenCursors.has(nextCursor)) {
+      break;
+    }
+
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+
+  return allDomains
+    .filter(domain => typeof domain.name === 'string' && domain.name)
+    .map(domain => ({
+      id: domain.id,
+      name: domain.name,
+      domainType: domain.domainType,
+      publicSuffix: domain.publicSuffix,
+      verificationStatus: domain.verificationStatus,
+      createdAt: domain.createdAt,
+      redirectForName: domain.redirectForName,
+      server: domain.server,
+    }));
 }
 
 /**

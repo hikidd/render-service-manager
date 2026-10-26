@@ -243,6 +243,13 @@ src/
 | `/api/services/{accountId}/{serviceId}/restart` | POST | 重启服务 |
 | `/api/services/{accountId}/{serviceId}/scale` | POST | 扩缩容服务 |
 
+`/api/services` 返回的每个服务还包含以下监控字段：
+
+- `bandwidth`：当前 UTC 月起至当前时间的 Render Outbound Bandwidth 累计值，单位为 GB；前端会按大小格式化为 MB 或 GB。
+- `customDomains`：Render Custom Domains 列表，包含域名名称和验证状态。
+
+这些字段会和服务列表一起缓存，点击刷新或缓存过期后重新从 Render API 获取。上游监控或域名接口单独失败时，不会阻断其他服务显示，对应字段会显示为空状态。
+
 ### 部署管理
 | 路由 | 方法 | 说明 |
 |------|------|------|
